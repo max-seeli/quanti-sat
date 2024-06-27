@@ -1,0 +1,4 @@
+ply
+sympy
+lark
+numpy
