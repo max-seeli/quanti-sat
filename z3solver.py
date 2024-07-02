@@ -36,6 +36,8 @@ def to_z3(expr: sp.Basic) -> z3.ExprRef:
         return And([to_z3(arg) for arg in expr.args])
     elif isinstance(expr, sp.Or):
         return Or([to_z3(arg) for arg in expr.args])
+    elif isinstance(expr, sp.Implies):
+        return Implies(to_z3(expr.args[0]), to_z3(expr.args[1]))
     elif isinstance(expr, sp.Not):
         return Not(to_z3(expr.args[0]))
     elif isinstance(expr, sp.Add):
