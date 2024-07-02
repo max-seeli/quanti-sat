@@ -12,6 +12,10 @@ class Quantifier(ABC):
     def subs(self, *args, **kwargs):
         pass
 
+    @property
+    @abstractmethod
+    def free_symbols(self):
+        pass
 
 class ForAll(Quantifier):
 
@@ -28,9 +32,13 @@ class ForAll(Quantifier):
         else:
             return Exists(self.variables, sp.Not(self.formula))
 
-    
     def subs(self, *args, **kwargs):
         return ForAll(self.variables, self.formula.subs(*args, **kwargs))
+    
+    @property
+    def free_symbols(self):
+        return self.formula.free_symbols - set(self.variables)
+
     
 class Exists(Quantifier):
 
@@ -49,3 +57,7 @@ class Exists(Quantifier):
 
     def subs(self, *args, **kwargs):
         return Exists(self.variables, self.formula.subs(*args, **kwargs))
+    
+    @property
+    def free_symbols(self):
+        return self.formula.free_symbols - set(self.variables)
