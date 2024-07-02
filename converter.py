@@ -230,6 +230,21 @@ def to_smt(constraint: sp.Basic) -> str:
     elif constraint.is_Pow:
         return f'(* {" ".join([to_smt(constraint.base)] * int(constraint.exp))})'
     elif constraint.is_Function and constraint.is_Boolean:
+        f = str(constraint.func).lower()
+        if f == 'not':
+            assert len(constraint.args) == 1, f'Expected 1 argument, got {len(constraint.args)}'
+            child = constraint.args[0]
+            if isinstance(child, sp.Implies):
+                return f'(and {to_smt(child.args[0])} {to_smt(sp.Not(child.args[1]))})'
+            elif isinstance(child, sp.And):
+                return f'(or {to_smt(sp.Not(child.args[0]))} {to_smt(sp.Not(child.args[1]))})'
+            elif isinstance(child, sp.Or):
+                return f'(and {to_smt(sp.Not(child.args[0]))} {to_smt(sp.Not(child.args[1]))})'
+            else:
+                assert False, f'Unable to reduce negation on: {type(child)}'
+        if f == 'implies':
+            assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
+            return f'(or {to_smt(sp.Not(constraint.args[0]))} {to_smt(constraint.args[1])})'
         return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
     elif isinstance(constraint, sp.UnevaluatedExpr):
         return to_smt(constraint.args[0])
