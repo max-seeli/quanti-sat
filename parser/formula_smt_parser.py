@@ -26,6 +26,7 @@ def parse_file(file_path):
     if len(free_symbols) > 0:
         converted_f = Exists(list(free_symbols), converted_f)
 
+    converted_f = converted_f.negate() # For the unsat dataset to be consistent with our sat solver
     return converted_f
 
 

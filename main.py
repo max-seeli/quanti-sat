@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 from parser.formula_parser import parse_file
 
 from tqdm import tqdm
+from warnings import warn
 
 from converter import convert
 from PolyHorn.src.PolyHorn import execute_smt2
@@ -34,9 +35,10 @@ class Experiment:
     def __run_folder(self):
         total, terminated, success, sat, unsat = 0, 0, 0, 0, 0
         dnf = []
+        unsuccesful = []
         models = {}
 
-        files = [file for file in os.listdir(self.folder) if file.endswith('.m')]
+        files = [file for file in os.listdir(self.folder) if file.endswith('.m') or file.endswith('.smt2')]
         for file in (pbar := tqdm(files)):
             pbar.set_description(f'Processing {file}...')
             result = self.__main(os.path.join(self.folder, file))
@@ -48,6 +50,8 @@ class Experiment:
                 models[file] = model
                 if is_sat == ground:
                     success += 1
+                else:
+                    unsuccesful.append(file)
                 if is_sat:
                     sat += 1
                 else:
@@ -56,12 +60,13 @@ class Experiment:
                 dnf.append(file)
         print('Results:')
         print('-------')
-        print(f'\tTotal: {total}')
-        print(f'\tTerminated: {terminated}')
-        print(f'\tSuccess: {success}')
-        print(f'\tSAT: {sat}')
-        print(f'\tUNSAT: {unsat}')
-        print(f'\tDid not terminate: {dnf}')
+        print(f'Total: {total}')
+        print(f'Terminated: {terminated}')
+        print(f'Success: {success}')
+        print(f'SAT: {sat}')
+        print(f'UNSAT: {unsat}')
+        print(f'Did not terminate: {dnf}')
+        print(f'Unsuccesful: {unsuccesful}')
         if self.show_model:
             print('Models:')
             for file, model in models.items():
@@ -81,18 +86,27 @@ class Experiment:
 
     def __main(self, file: str):
         quantified_formula = parse_file(file)
-        converted_formula = convert(quantified_formula, degree=self.degree, output=self.output)
+        if quantified_formula is None:
+            warn(f'The formula could not be parsed for {file}.')
+            return None
         
+        try:
+            converted_formula = set_timeout(convert, self.timeout, quantified_formula, degree=self.degree, output=self.output)
+        except TimeoutError:
+            print(f'The formula could not be converted for {file}. (Probably due to the high degree of the templates)')
+            return None
+
         if not self.convert_only:
             try:
                 ground = set_timeout(SAT, self.timeout, quantified_formula)
             except TimeoutError:
-                print(f'The ground truth could not be determined for {file}.')
+                print(f'Timeout while determining the ground truth for {file}.')
                 ground = None
             try:
                 is_sat, model = set_timeout(execute_smt2, self.timeout, self.polyhorn_config, converted_formula)
                 return is_sat, model, ground
             except TimeoutError:
+                print(f'Timeout while solving the formula for {file}.')
                 pass
         return None
 

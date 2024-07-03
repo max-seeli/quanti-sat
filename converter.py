@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from itertools import product
 from typing import Dict, List, Tuple
+from warnings import warn
 
 import sympy as sp
 
@@ -135,7 +136,7 @@ def generate_smt2(free_vars: List[sp.Symbol], all_quantified_vars: List[sp.Symbo
 
     smt_formula = to_smt(formula)
 
-    smt_lines.append(f'(assert (forall {forall_vars} (=> (> 1 0) {smt_formula})))')
+    smt_lines.append(f'(assert (forall {forall_vars} (=> (>= 1 0) {smt_formula})))')
     smt_lines.append('(check-sat)')
     smt_lines.append('(get-model)')
 
@@ -217,11 +218,17 @@ def to_smt(constraint: sp.Basic) -> str:
         The SMT2 string representing the constraint.
     """
     if constraint.is_Relational:
+        assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
         arg_pair = f'{to_smt(constraint.lhs)} {to_smt(constraint.rhs)}'
         if constraint.rel_op == '==':
             # PolyHorn Bug
             return f'(and (<= {arg_pair}) (>= {arg_pair}))'
+        elif constraint.rel_op == '!=':
+            return f'(or (< {arg_pair}) (> {arg_pair}))'
+        elif constraint.rel_op in ['<', '<=', '>', '>=']:
+            return f'({constraint.rel_op} {arg_pair})'
         else:
+            warn(f'Unsupported relational operator: {constraint.rel_op}')
             return f'({constraint.rel_op} {arg_pair})'
     elif constraint.is_Add:
         return f'(+ {" ".join([to_smt(arg) for arg in constraint.args])})'
@@ -231,21 +238,32 @@ def to_smt(constraint: sp.Basic) -> str:
         return f'(* {" ".join([to_smt(constraint.base)] * int(constraint.exp))})'
     elif constraint.is_Function and constraint.is_Boolean:
         f = str(constraint.func).lower()
-        if f == 'not':
+        if f == 'and':
+            assert len(constraint.args) >= 2, f'Expected 2 arguments, got {len(constraint.args)}'
+            return f'(and {" ".join([to_smt(arg) for arg in constraint.args])})'
+        elif f == 'or':
+            assert len(constraint.args) >= 2, f'Expected 2 arguments, got {len(constraint.args)}'
+            return f'(or {" ".join([to_smt(arg) for arg in constraint.args])})'
+        elif f == 'not':
             assert len(constraint.args) == 1, f'Expected 1 argument, got {len(constraint.args)}'
             child = constraint.args[0]
             if isinstance(child, sp.Implies):
+                assert len(child.args) == 2, f'Expected 2 arguments, got {len(child.args)}'
                 return f'(and {to_smt(child.args[0])} {to_smt(sp.Not(child.args[1]))})'
             elif isinstance(child, sp.And):
-                return f'(or {to_smt(sp.Not(child.args[0]))} {to_smt(sp.Not(child.args[1]))})'
+                assert len(child.args) >= 2, f'Expected 2 arguments, got {len(child.args)}'
+                return f'(or {" ".join([to_smt(sp.Not(arg)) for arg in child.args])})'
             elif isinstance(child, sp.Or):
+                assert len(child.args) == 2, f'Expected 2 arguments, got {len(child.args)}'
                 return f'(and {to_smt(sp.Not(child.args[0]))} {to_smt(sp.Not(child.args[1]))})'
             else:
-                assert False, f'Unable to reduce negation on: {type(child)}'
-        if f == 'implies':
+                raise ValueError(f'Unable to reduce negation on: {type(child)}')
+        elif f == 'implies':
             assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
             return f'(or {to_smt(sp.Not(constraint.args[0]))} {to_smt(constraint.args[1])})'
-        return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
+        else:
+            warn(f'Unsupported function: {f}')
+            return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
     elif isinstance(constraint, sp.UnevaluatedExpr):
         return to_smt(constraint.args[0])
     elif constraint.is_Symbol:
@@ -253,8 +271,8 @@ def to_smt(constraint: sp.Basic) -> str:
     elif constraint.is_Number:
         return str(constraint)
     elif constraint == sp.true:
-        return 'true'
+        return '(<= 0 1)'
     elif constraint == sp.false:
-        return 'false'
+        return '(<= 1 0)'
     else:
         raise ValueError(f'Unsupported constraint type: {type(constraint)}\n\tFor constraint: {constraint}')
