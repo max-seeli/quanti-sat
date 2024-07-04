@@ -37,7 +37,12 @@ class ForAll(Quantifier):
     
     @property
     def free_symbols(self):
-        return self.formula.free_symbols - set(self.variables)
+        result = []
+        for s in self.formula.free_symbols:
+            if s.name not in [v.name for v in self.variables]:
+                result.append(s)
+
+        return result
 
     
 class Exists(Quantifier):
@@ -60,4 +65,9 @@ class Exists(Quantifier):
     
     @property
     def free_symbols(self):
-        return self.formula.free_symbols - set(self.variables)
+        result = []
+        for s in self.formula.free_symbols:
+            if s.name not in [v.name for v in self.variables]:
+                result.append(s)
+
+        return result
