@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from itertools import product
 from typing import Dict, List, Tuple
+from abc import abstractmethod, ABC
+from enum import Enum
 from warnings import warn
 
 import sympy as sp
 
 from quantifier import Exists, ForAll, Quantifier
+from util import to_smt
 
 
-def convert(quantified_formula: Quantifier, degree: int, output: str = None) -> str:
+def convert(quantified_formula: Quantifier, degree: int, variant: GenerationVariant, output: str = None) -> str:
     """
     Convert a quantified formula to an SMT2 formula.
 
@@ -19,6 +22,8 @@ def convert(quantified_formula: Quantifier, degree: int, output: str = None) -> 
         The quantified formula to be converted.
     degree : int
         The degree of the polynomial templates.
+    variant : GenerationVariant, optional
+        The generation variant of the SMT2 formula, by default GenerationVariant.FORALL_ONLY.
     output : str, optional
         The file to save the SMT2 formula, by default None.
 
@@ -27,252 +32,392 @@ def convert(quantified_formula: Quantifier, degree: int, output: str = None) -> 
     str
         The SMT2 formula.
     """
-    all_quantified_vars, substitutions, formula = extract_2(quantified_formula, degree)
-    formula = formula.subs(substitutions)
-    free_variables = set(formula.free_symbols) - set(all_quantified_vars)
+    converter = Converter(degree, variant)
+    return converter.convert(quantified_formula, output)
 
-    smt2 = generate_smt2(list(free_variables), all_quantified_vars, formula)
-
-    if output is not None:
-        with open(output, 'w') as f:
-            f.write(smt2)
-    return smt2
-
-def extract_1(quantified_formula: Quantifier, degree: int) -> Tuple[List[sp.Symbol], Dict[sp.Symbol, sp.Basic], sp.Basic]:
+class GenerationVariant(Enum):
     """
-    Extract the quantified variables and the substitutions from a quantified formula.
-    
-    Veriables with an *exists* quantifier will be replaced by a linear expression
-    over all previous variables (to the left).
+    The generation variant of the SMT2 formula.
 
-    Parameters
-    ----------
-    quantified_formula : Quantifier
-        The quantified formula to extract the variables and substitutions.
-    degree : int
-        The degree of the polynomial expressions.
-        
-    Returns
-    -------
-    all_quantified_vars : List[sp.Symbol]
-        The list of all quantified variables.
-    substitutions : Dict[sp.Symbol, sp.Basic]
-        The dictionary of substitutions.
-        formula : sp.Basic
-        The formula without quantifiers.
+    FORALL_ONLY: The templates are expressions of the forall-quantified variables.
+    FORALL_EXISTS: The templates are expressions of the forall-quantified variables and the exists-quantified variables.
+    ASSERTIONS: The templates are asserted on the left side of the constraint pairs.
     """
-    vars = []
-    all_quantified_vars = []
-    substitutions = {}
+    FORALL_ONLY = 0
+    FORALL_EXISTS = 1
+    ASSERTIONS = 2
 
-    counter = 0
-    while isinstance(quantified_formula, Quantifier):
-        if isinstance(quantified_formula, ForAll):
-            vars.extend(quantified_formula.variables)
-            all_quantified_vars.extend(quantified_formula.variables)
-        elif isinstance(quantified_formula, Exists):
-            exists_vars = quantified_formula.variables
-            sub_dict = {var: get_polynomial_expression(f'a_{counter}_{i}', vars, degree) for i, var in enumerate(exists_vars)}
-            vars.extend(exists_vars)
-
-            for prev_var, prev_expr in substitutions.items():
-                for var, expr in sub_dict.items():
-                    sub_dict[var] = expr.subs(prev_var, prev_expr)
-
-            substitutions.update(sub_dict)
-            counter += 1
-        quantified_formula = quantified_formula.formula
-
-    return all_quantified_vars, substitutions, quantified_formula
-
-def extract_2(quantified_formula: Quantifier, degree: int) -> Tuple[List[sp.Symbol], Dict[sp.Symbol, sp.Basic], sp.Basic]:
+class Converter:
     """
-    Extract the quantified variables and the substitutions from a quantified formula.
-    
-    Veriables with an *exists* quantifier will be replaced by a linear expression
-    over all previous *forall*-quantified variables (to the left).
-
-    Parameters
-    ----------
-    quantified_formula : Quantifier
-        The quantified formula to extract the variables and substitutions.
-    degree : int
-        The degree of the polynomial expressions.
-        
-    Returns
-    -------
-    all_quantified_vars : List[sp.Symbol]
-        The list of all quantified variables.
-    substitutions : Dict[sp.Symbol, sp.Basic]
-        The dictionary of substitutions.
-        formula : sp.Basic
-        The formula without quantifiers.
+    The converter class to convert a quantified formula to an SMT2 formula.
     """
-    all_quantified_vars = []
-    substitutions = {}
-
-    counter = 0
-    while isinstance(quantified_formula, Quantifier):
-        if isinstance(quantified_formula, ForAll):
-            all_quantified_vars.extend(quantified_formula.variables)
-        elif isinstance(quantified_formula, Exists):
-            exists_vars = quantified_formula.variables
-            sub_dict = {var: get_polynomial_expression(f'a_{counter}_{i}', all_quantified_vars, degree) for i, var in enumerate(exists_vars)}
-            substitutions.update(sub_dict)
-            counter += 1
-        quantified_formula = quantified_formula.formula
-
-    return all_quantified_vars, substitutions, quantified_formula
-
-def generate_smt2(free_vars: List[sp.Symbol], all_quantified_vars: List[sp.Symbol], formula: sp.Basic) -> str:
-
-    smt_lines = []
-
-    for var in free_vars:
-        smt_lines.append(f'(declare-const {var.name} Real)')
-
-    forall_vars = [f'({var.name} Real)' for var in all_quantified_vars]
-    forall_vars = f"({' '.join(forall_vars)})"
-
-    smt_formula = to_smt(formula)
-
-    smt_lines.append(f'(assert (forall {forall_vars} (=> (>= 1 0) {smt_formula})))')
-    smt_lines.append('(check-sat)')
-    smt_lines.append('(get-model)')
-
-    return '\n'.join(smt_lines)
-
-def get_linear_expression(coeffs_name: str, variables: List[sp.Symbol]) -> sp.Expr:
+    def __init__(self, degree: int, variant: GenerationVariant = GenerationVariant.FORALL_ONLY):
         """
-        Get a linear expression given the coefficients and the variables.
+        Initialize the converter.
+
+        Parameters
+        ----------
+        degree : int
+            The degree of the polynomial templates.
+        variant : GenerationVariant, optional
+            The generation variant of the SMT2 formula, by default GenerationVariant.FORALL_ONLY.
+        """
+        self.degree = degree
+        self.variant = variant
+
+    def convert(self, quantified_formula: Quantifier, output: str = None) -> str:
+        """
+        Convert a quantified formula to an SMT2 formula.
+
+        Parameters
+        ----------
+        quantified_formula : Quantifier
+            The quantified formula to be converted.
+        output : str, optional
+            The file to save the SMT2 formula, by default None.
+
+        Returns
+        -------
+        str
+            The SMT2 formula.
+        """
+        extractor = Extractor.get_extractor(self.degree, self.variant)
+        forall_quant_vars, template_subs, ground_formula, assertion = extractor.extract(quantified_formula)
+
+        ground_formula = ground_formula.subs(template_subs)
+
+        all_vars = set(ground_formula.free_symbols).union(set(assertion.free_symbols))
+        free_vars = all_vars - set(forall_quant_vars)
+
+        smt2 = self.generate_smt2(list(free_vars), forall_quant_vars, assertion, ground_formula)
+
+        if output is not None:
+            with open(output, 'w') as f:
+                f.write(smt2)
+        return smt2
+    
+    def generate_smt2(self, free_vars: List[sp.Symbol], forall_quant_vars: List[sp.Symbol], assertion: sp.Basic, ground_formula: sp.Basic) -> str:
+        smt_lines = []
+
+        for var in free_vars:
+            smt_lines.append(f'(declare-const {var.name} Real)')
+
+        forall_vars = [f'({var.name} Real)' for var in forall_quant_vars]
+        forall_vars = f"({' '.join(forall_vars)})"
+
+
+
+        #premise = to_smt(assertion)
+        # Check if ground_formula is CNF
+        #ground_formula = sp.to_cnf(ground_formula)
+        
+        #if isinstance(ground_formula, sp.And):
+        if False:
+            for clause in ground_formula.args:
+                if isinstance(clause, sp.Or):
+                    lhs = sp.And(*[sp.Not(arg) for arg in clause.args[:-1]])
+                    rhs = clause.args[-1]
+                    smt_lines.append(f'(assert (forall {forall_vars} (=> {to_smt(lhs)} {to_smt(rhs)})))')
+                else:
+                    smt_lines.append(f'(assert (forall {forall_vars} (=> (>= 1 0) {to_smt(clause)})))')
+        else:
+            smt_lines.append(f'(assert (forall {forall_vars} (=> (>= 1 0) {to_smt(ground_formula)})))')
+
+        smt_lines.append('(check-sat)')
+        smt_lines.append('(get-model)')
+
+        return '\n'.join(smt_lines)
+
+class Extractor(ABC):
+    """
+    The extractor class to extract the quantified variables and the substitutions from a quantified formula.
+
+    Usage
+    -----
+    ```python
+    extractor = Extractor.get_extractor(degree, variant)
+
+    forall_quant_vars, template_subs, ground_formula, assertion = extractor.extract(quantified_formula)
+    ```
+    """
+
+    _create_key = object()
+
+    @classmethod
+    def get_extractor(cls, degree: int, variant: GenerationVariant) -> Extractor:
+        """
+        Get an extractor.
+
+        Parameters
+        ----------
+        degree : int
+            The degree of the polynomial templates.
+        variant : GenerationVariant
+            The generation variant of the SMT2 formula.
+
+        Returns
+        -------
+        Extractor
+            The extractor.
+        """
+        match variant:
+            case GenerationVariant.FORALL_ONLY:
+                return ForallOnlyExtractor(degree)
+            case GenerationVariant.FORALL_EXISTS:
+                return ForallExistsExtractor(degree)
+            case GenerationVariant.ASSERTIONS:
+                raise ValueError("Currently not working")
+                return AssertionsExtractor(degree)
+            case _:
+                raise ValueError(f'Unsupported generation variant: {variant}')
+
+    def __init__(self, create_key: object, degree: int):
+        """
+        Initialize the extractor.
+
+        Parameters
+        ----------
+        create_key : object
+            The key to create the extractor.
+        """
+        if create_key is not Extractor._create_key:
+            raise ValueError('Extractor cannot be instantiated directly. Use get_extractor(..) instead.')
+        self.degree = degree
+    
+    @abstractmethod
+    def extract(self, quantified_formula: Quantifier) -> Tuple[List[sp.Symbol], Dict[sp.Symbol, sp.Basic], sp.Basic]:
+        """
+        Extract information from a quantified formula such that we can construct constraints from it.
+
+        Parameters
+        ----------
+        quantified_formula : Quantifier
+            The quantified formula to extract the variables and substitutions.
+            
+        Returns
+        -------
+        forall_quant_vars : List[sp.Symbol]
+            The list of forall-quantified variables.
+        template_subs : Dict[sp.Symbol, sp.Basic]
+            The dictionary of substitutions for the templates of the exists-quantified variables.
+        ground_formula : sp.Basic
+            The formula without quantifiers.
+        assertion : sp.Basic
+            Assertions to be added to the left side of the constraint pairs.
+        """
+        pass
+
+    def get_polynomial_expression(self, coeffs_name: str, variables: List[sp.Symbol]) -> sp.Expr:
+        """
+        Get a polynomial expression given the coefficients and the variables.
 
         Parameters
         ----------
         coeffs_name : str
             The name of the coefficients.
         variables : List[sp.Symbol]
-            The variables of the linear expression.
+            The variables of the polynomial expression.
+        degree : int
+            The degree of the polynomial expression.
 
         Returns
         -------
         sp.Expr
-            The linear expression.
+            The polynomial expression.
         """
-        coeffs = [sp.Symbol(f'{coeffs_name}_{i}') for i in range(len(variables) + 1)]
-        return coeffs[0] + sum([coeff * variable for variable, coeff in zip(variables, coeffs[1:])])
+        monomials = self.get_all_monomials(variables)
+        coeffs = [sp.Symbol(f'{coeffs_name}_{i}') for i in range(len(monomials))]
+        return sum([coeff * monomial for coeff, monomial in zip(coeffs, monomials)])
 
-def get_polynomial_expression(coeffs_name: str, variables: List[sp.Symbol], degree: int) -> sp.Expr:
+    def get_all_monomials(self, variables: List[sp.Symbol]) -> List[sp.Expr]:
+        """
+        Get all monomials of a given degree over the variables.
+
+        Parameters
+        ----------
+        variables : List[sp.Symbol]
+            The variables of the monomials.
+        degree : int
+            The degree of the monomials.
+
+        Returns
+        -------
+        List[sp.Expr]
+            The list of monomials.
+        """
+        monomials = []
+        for exponents in product(range(self.degree + 1), repeat=len(variables)):
+            if sum(exponents) <= self.degree:
+                monomials.append(sp.prod([variable**exponent for variable, exponent in zip(variables, exponents)]))
+        return monomials
+
+
+
+class ForallOnlyExtractor(Extractor):
     """
-    Get a polynomial expression given the coefficients and the variables.
-
-    Parameters
-    ----------
-    coeffs_name : str
-        The name of the coefficients.
-    variables : List[sp.Symbol]
-        The variables of the polynomial expression.
-    degree : int
-        The degree of the polynomial expression.
-
-    Returns
-    -------
-    sp.Expr
-        The polynomial expression.
+    The extractor for the FORALL_ONLY generation variant.
     """
-    monomials = get_all_monomials(variables, degree)
-    coeffs = [sp.Symbol(f'{coeffs_name}_{i}') for i in range(len(monomials))]
-    return sum([coeff * monomial for coeff, monomial in zip(coeffs, monomials)])
+    def __init__(self, degree: int):
+        """
+        Initialize the extractor.
 
-def get_all_monomials(variables: List[sp.Symbol], degree: int) -> List[sp.Expr]:
-    """
-    Get all monomials of a given degree.
+        Parameters
+        ----------
+        degree : int
+            The degree of the polynomial templates.
+        """
+        super().__init__(Extractor._create_key, degree)
 
-    Parameters
-    ----------
-    variables : List[sp.Symbol]
-        The variables of the monomials.
-    degree : int
-        The degree of the monomials.
+    def extract(self, quantified_formula: Quantifier) -> Tuple[List[sp.Symbol], Dict[sp.Symbol, sp.Basic], sp.Basic]:
+        """
+        Extract information from a quantified formula such that we can construct constraints from it.
 
-    Returns
-    -------
-    List[sp.Expr]
-        The list of monomials.
-    """
-    monomials = []
-    for exponents in product(range(degree + 1), repeat=len(variables)):
-        if sum(exponents) <= degree:
-            monomials.append(sp.prod([variable**exponent for variable, exponent in zip(variables, exponents)]))
-    return monomials
+        Parameters
+        ----------
+        quantified_formula : Quantifier
+            The quantified formula to extract the variables and substitutions.
 
-def to_smt(constraint: sp.Basic) -> str:
+        Returns
+        -------
+        forall_quant_vars : List[sp.Symbol]
+            The list of forall-quantified variables.
+        template_subs : Dict[sp.Symbol, sp.Basic]
+            The dictionary of substitutions for the templates of the exists-quantified variables.
+        ground_formula : sp.Basic
+            The formula without quantifiers.
+        assertion : sp.Basic
+            Assertions to be added to the left side of the constraint pairs.
+        """
+        forall_quant_vars = []
+        template_subs = {}
+
+        counter = 0
+        while isinstance(quantified_formula, Quantifier):
+            if isinstance(quantified_formula, ForAll):
+                forall_quant_vars.extend(quantified_formula.variables)
+            elif isinstance(quantified_formula, Exists):
+                exists_vars = quantified_formula.variables
+                sub_dict = {var: self.get_polynomial_expression(f'a_{counter}_{i}', forall_quant_vars) for i, var in enumerate(exists_vars)}
+                template_subs.update(sub_dict)
+                counter += 1
+            quantified_formula = quantified_formula.formula
+        ground_formula = quantified_formula
+
+        return forall_quant_vars, template_subs, ground_formula, sp.true
+
+
+class ForallExistsExtractor(Extractor):
     """
-    Convert a constraint to an SMT2 string.
-    Parameters
-    ----------
-    constraint : sp.Basic
-        The constraint to be converted.
-    Returns
-    -------
-    str
-        The SMT2 string representing the constraint.
+    The extractor for the FORALL_EXISTS generation variant.
     """
-    if constraint.is_Relational:
-        assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
-        arg_pair = f'{to_smt(constraint.lhs)} {to_smt(constraint.rhs)}'
-        if constraint.rel_op == '==':
-            # PolyHorn Bug
-            return f'(and (<= {arg_pair}) (>= {arg_pair}))'
-        elif constraint.rel_op == '!=':
-            return f'(or (< {arg_pair}) (> {arg_pair}))'
-        elif constraint.rel_op in ['<', '<=', '>', '>=']:
-            return f'({constraint.rel_op} {arg_pair})'
-        else:
-            warn(f'Unsupported relational operator: {constraint.rel_op}')
-            return f'({constraint.rel_op} {arg_pair})'
-    elif constraint.is_Add:
-        return f'(+ {" ".join([to_smt(arg) for arg in constraint.args])})'
-    elif constraint.is_Mul:
-        return f'(* {" ".join([to_smt(arg) for arg in constraint.args])})'
-    elif constraint.is_Pow:
-        return f'(* {" ".join([to_smt(constraint.base)] * int(constraint.exp))})'
-    elif constraint.is_Function and constraint.is_Boolean:
-        f = str(constraint.func).lower()
-        if f == 'and':
-            assert len(constraint.args) >= 2, f'Expected 2 arguments, got {len(constraint.args)}'
-            return f'(and {" ".join([to_smt(arg) for arg in constraint.args])})'
-        elif f == 'or':
-            assert len(constraint.args) >= 2, f'Expected 2 arguments, got {len(constraint.args)}'
-            return f'(or {" ".join([to_smt(arg) for arg in constraint.args])})'
-        elif f == 'not':
-            assert len(constraint.args) == 1, f'Expected 1 argument, got {len(constraint.args)}'
-            child = constraint.args[0]
-            if isinstance(child, sp.Implies):
-                assert len(child.args) == 2, f'Expected 2 arguments, got {len(child.args)}'
-                return f'(and {to_smt(child.args[0])} {to_smt(sp.Not(child.args[1]))})'
-            elif isinstance(child, sp.And):
-                assert len(child.args) >= 2, f'Expected 2 arguments, got {len(child.args)}'
-                return f'(or {" ".join([to_smt(sp.Not(arg)) for arg in child.args])})'
-            elif isinstance(child, sp.Or):
-                assert len(child.args) == 2, f'Expected 2 arguments, got {len(child.args)}'
-                return f'(and {to_smt(sp.Not(child.args[0]))} {to_smt(sp.Not(child.args[1]))})'
-            else:
-                raise ValueError(f'Unable to reduce negation on: {type(child)}')
-        elif f == 'implies':
-            assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
-            return f'(or {to_smt(sp.Not(constraint.args[0]))} {to_smt(constraint.args[1])})'
-        else:
-            warn(f'Unsupported function: {f}')
-            return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
-    elif isinstance(constraint, sp.UnevaluatedExpr):
-        return to_smt(constraint.args[0])
-    elif constraint.is_Symbol:
-        return constraint.name
-    elif constraint.is_Number:
-        return str(constraint)
-    elif constraint == sp.true:
-        return '(<= 0 1)'
-    elif constraint == sp.false:
-        return '(<= 1 0)'
-    else:
-        raise ValueError(f'Unsupported constraint type: {type(constraint)}\n\tFor constraint: {constraint}')
+    def __init__(self, degree: int):
+        """
+        Initialize the extractor.
+
+        Parameters
+        ----------
+        degree : int
+            The degree of the polynomial templates.
+        """
+        super().__init__(Extractor._create_key, degree)
+
+    def extract(self, quantified_formula: Quantifier) -> Tuple[List[sp.Symbol], Dict[sp.Symbol, sp.Basic], sp.Basic]:
+        """
+        Extract information from a quantified formula such that we can construct constraints from it.
+
+        Parameters
+        ----------
+        quantified_formula : Quantifier
+            The quantified formula to extract the variables and substitutions.
+
+        Returns
+        -------
+        forall_quant_vars : List[sp.Symbol]
+            The list of forall-quantified variables.
+        template_subs : Dict[sp.Symbol, sp.Basic]
+            The dictionary of substitutions for the templates of the exists-quantified variables.
+        ground_formula : sp.Basic
+            The formula without quantifiers.
+        assertion : sp.Basic
+            Assertions to be added to the left side of the constraint pairs.
+        """
+        all_vars = []
+        forall_quant_vars = []
+        template_subs = {}
+
+        counter = 0
+        while isinstance(quantified_formula, Quantifier):
+            if isinstance(quantified_formula, ForAll):
+                all_vars.extend(quantified_formula.variables)
+                forall_quant_vars.extend(quantified_formula.variables)
+            elif isinstance(quantified_formula, Exists):
+                all_vars.extend(quantified_formula.variables)
+                sub_dict = {var: self.get_polynomial_expression(f'a_{counter}_{i}', all_vars) for i, var in enumerate(quantified_formula.variables)}
+
+            for prev_var, prev_expr in template_subs.items():
+                for var, expr in sub_dict.items():
+                    sub_dict[var] = expr.subs(prev_var, prev_expr)
+
+            template_subs.update(sub_dict)
+            counter += 1
+            quantified_formula = quantified_formula.formula
+        ground_formula = quantified_formula
+
+        return forall_quant_vars, template_subs, ground_formula, sp.true
+   
+
+
+class AssertionsExtractor(Extractor):
+    """
+    The extractor for the ASSERTIONS generation variant.
+    """
+    def __init__(self, degree: int):
+        """
+        Initialize the extractor.
+
+        Parameters
+        ----------
+        degree : int
+            The degree of the polynomial templates.
+        """
+        super().__init__(Extractor._create_key, degree)
+
+    def extract(self, quantified_formula: Quantifier) -> Tuple[List[sp.Symbol], Dict[sp.Symbol, sp.Basic], sp.Basic]:
+        """
+        Extract information from a quantified formula such that we can construct constraints from it.
+
+        Parameters
+        ----------
+        quantified_formula : Quantifier
+            The quantified formula to extract the variables and substitutions.
+
+        Returns
+        -------
+        forall_quant_vars : List[sp.Symbol]
+            The list of forall-quantified variables.
+        template_subs : Dict[sp.Symbol, sp.Basic]
+            The dictionary of substitutions for the templates of the exists-quantified variables.
+        ground_formula : sp.Basic
+            The formula without quantifiers.
+        assertion : sp.Basic
+            Assertions to be added to the left side of the constraint pairs.
+        """
+        forall_quant_vars = []
+        template_subs = {}
+
+        counter = 0
+        while isinstance(quantified_formula, Quantifier):
+            if isinstance(quantified_formula, ForAll):
+                forall_quant_vars.extend(quantified_formula.variables)
+            elif isinstance(quantified_formula, Exists):
+                sub_dict = {var: self.get_polynomial_expression(f'a_{counter}_{i}', forall_quant_vars) for i, var in enumerate(quantified_formula.variables)}
+                template_subs.update(sub_dict)
+                counter += 1
+            quantified_formula = quantified_formula.formula
+        ground_formula = quantified_formula
+
+        assertions = []
+        for var, expr in template_subs.items():
+            assertions.append(sp.Eq(var, expr))
+        assertion = sp.And(*assertions)
+        return forall_quant_vars, {}, ground_formula, assertion

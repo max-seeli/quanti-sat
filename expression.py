@@ -1,0 +1,50 @@
+
+from itertools import product
+from typing import List
+import sympy as sp
+
+
+def get_polynomial_expression(coeffs_name: str, variables: List[sp.Symbol], degree: int) -> sp.Expr:
+    """
+    Get a polynomial expression given the coefficients and the variables.
+    
+    Parameters
+    ----------
+    coeffs_name : str
+        The name of the coefficients.
+    variables : List[sp.Symbol]
+        The variables of the polynomial expression.
+    degree : int
+        The degree of the polynomial expression.
+
+    Returns
+    -------
+    sp.Expr
+        The polynomial expression.
+    """
+    monomials = get_all_monomials(variables, degree)
+    coeffs = [sp.Symbol(f'{coeffs_name}_{i}') for i in range(len(monomials))]
+    return sum([coeff * monomial for coeff, monomial in zip(coeffs, monomials)])
+
+
+def get_all_monomials(variables: List[sp.Symbol], degree: int) -> List[sp.Expr]:
+    """
+    Get all monomials of a given degree over the variables.
+    
+    Parameters
+    ----------
+    variables : List[sp.Symbol]
+        The variables of the monomials.
+    degree : int
+        The degree of the monomials.
+    
+    Returns
+    -------
+    List[sp.Expr]
+        The list of monomials.
+    """
+    monomials = []
+    for exponents in product(range(degree + 1), repeat=len(variables)):
+        if sum(exponents) <= degree:
+            monomials.append(sp.prod([variable**exponent for variable, exponent in zip(variables, exponents)]))
+    return monomials

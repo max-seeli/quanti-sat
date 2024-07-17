@@ -1,8 +1,9 @@
 from z3 import *
 import sympy as sp
 import quantifier as q
+from typing import Tuple, Dict
 
-def SAT(formula: sp.Basic) -> bool:
+def SAT(formula: sp.Basic, timeout: int) -> bool:
     """
     Check if the formula is satisfiable.
     
@@ -10,6 +11,8 @@ def SAT(formula: sp.Basic) -> bool:
     ----------
     formula : sp.Basic
         The formula to be checked.
+    timeout : int
+        The timeout in seconds.
         
     Returns
     -------
@@ -17,8 +20,55 @@ def SAT(formula: sp.Basic) -> bool:
         True if the formula is satisfiable, False otherwise.
     """
     s = Solver()
+    s.set("timeout", timeout * 1000)
+
     s.add(to_z3(formula))
-    return s.check() == sat
+    
+    result = s.check()
+    if result == sat:
+        return True
+    elif result == unsat:
+        return False
+    else:
+        return None
+
+def SAT2(formula: str, timeout: int) -> Tuple[bool, Dict[str, float]]:
+    """
+    Check if the formula is satisfiable.
+    
+    Parameters
+    ----------
+    formula : str
+        The formula in smt2 to be checked.
+    timeout : int
+        The timeout in seconds.
+        
+    Returns
+    -------
+    bool
+        True if the formula is satisfiable, False otherwise.
+    Dict[str, float]
+        The model.
+    """
+    s = Solver()
+    s.set("timeout", timeout * 1000)
+    
+    # Provide a model for all variables (even those that could be logically reduced)
+
+
+    f = parse_smt2_string(formula)
+    for expr in f:
+        print(simplify(expr))
+    s.add(parse_smt2_string(formula))
+    
+    result = s.check()
+    if result == sat:
+        model = s.model()
+        return True, {d.name(): model[d] for d in model.decls()}
+    elif result == unsat:
+        return False, {}
+    else:
+        return None
 
 
 def to_z3(expr: sp.Basic) -> z3.ExprRef:

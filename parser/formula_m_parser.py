@@ -6,7 +6,7 @@ tokens = (
     'FORALL', 'EXISTS',
     'AND', 'OR',
     'LPAREN', 'RPAREN', 'LSQUARE', 'RSQUARE', 'LBRAKET', 'RBRAKET',
-    'LEQ', 'VARIABLE', 'NUMBER', 'COMMA',
+    'LEQ', 'LT', 'VARIABLE', 'NUMBER', 'COMMA',
     'PLUS', 'MINUS', 'TIMES'
 )
 
@@ -15,6 +15,7 @@ t_EXISTS = r'Exists'
 t_AND = r'And'
 t_OR = r'Or'
 t_LEQ = r'<='
+t_LT = r'<'
 t_PLUS = r'\+'
 t_MINUS = r'-'
 t_TIMES = r'\*'
@@ -91,11 +92,14 @@ def p_logical_expression_list(p):
 
 def p_logical_term(p):
     '''logical_term : LPAREN logical_term RPAREN
-                    | arithmetic_expression LEQ arithmetic_expression'''
+                    | arithmetic_expression LEQ arithmetic_expression
+                    | arithmetic_expression LT arithmetic_expression'''
     if p[1] == '(' and p[3] == ')':
         p[0] = p[2]
-    else:
+    elif p[2] == '<=':
         p[0] = p[1] <= p[3]
+    elif p[2] == '<':
+        p[0] = p[1] < p[3]
 
 def p_arithmetic_expression(p):
     '''arithmetic_expression : arithmetic_term
