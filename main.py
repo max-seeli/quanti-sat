@@ -18,6 +18,8 @@ class Result(Enum):
     CONVERSION_TIMEOUT = 3
     SOLVER_TIMEOUT = 4
     PARSING_ERROR = 5
+    BUG = 6
+    BUG2 = 7
 
 class Verbosity(Enum):
     RESULT_ONLY = 1
@@ -134,29 +136,58 @@ class Experiment:
             print('Quantified formula:')
             print(quantified_formula)
 
+        qf = quantified_formula
+        nqf = qf.negate()
+
         try:
-            start_time = time.time()
-            converted_formula = set_timeout(convert, self.timeout, quantified_formula, degree=self.degree, variant=GenerationVariant.FORALL_ONLY, output=self.output)
-            self.current_conversion_time = time.time() - start_time
+            qf_time = time.time()
+            qf_conv = set_timeout(convert, self.timeout, qf, degree=self.degree, variant=GenerationVariant.FORALL_ONLY, output=self.output)
+            qf_time = time.time() - qf_time
+
+            nqf_time = time.time()
+            nqf_conv = set_timeout(convert, self.timeout, nqf, degree=self.degree, variant=GenerationVariant.FORALL_ONLY, output=self.output)
+            nqf_time = time.time() - nqf_time
+
+            self.current_conversion_time = (qf_time + nqf_time) / 2
         except TimeoutError:
             self.current_result = Result.CONVERSION_TIMEOUT
             return None
         
         if self.verbose.value >= Verbosity.RESULT_FORMULA.value:
             print('Converted formula:')
-            print(converted_formula)
+            print(qf_conv)
 
         if not self.convert_only:
             try:
-                start_time = time.time()
-                is_sat, model = set_timeout(execute_smt2, self.timeout, self.polyhorn_config, converted_formula)
-                self.current_solving_time = time.time() - start_time
-                self.current_result = Result.CORRECT if is_sat else Result.INCORRECT
-                return is_sat, model
+                qf_time = time.time()
+                is_sat, model = set_timeout(execute_smt2, self.timeout, self.polyhorn_config, qf_conv)
+                qf_time = time.time() - qf_time
+
+                nqf_time = time.time()
+                is_sat_neg, model_neg = set_timeout(execute_smt2, self.timeout, self.polyhorn_config, nqf_conv)
+                nqf_time = time.time() - nqf_time
+
+                self.current_solving_time = (qf_time + nqf_time) / 2
+
+                if is_sat_neg and is_sat:
+                    self.current_result = Result.BUG
+                    return None
+                elif (is_sat_neg and not is_sat) or (not is_sat_neg and is_sat):
+                    self.current_result = Result.CORRECT
+                    return is_sat, model if is_sat else model_neg
+                elif not is_sat_neg and not is_sat:
+                    self.current_result = Result.INCORRECT
+                    return None
+                else:
+                    self.current_result = Result.BUG2
+                    return None
+
             except TimeoutError:
                 self.current_result = Result.SOLVER_TIMEOUT
                 pass
         return None
+    
+
     
     def __get_result_message(self):
         match self.current_result:

@@ -57,8 +57,6 @@ def SAT2(formula: str, timeout: int) -> Tuple[bool, Dict[str, float]]:
 
 
     f = parse_smt2_string(formula)
-    for expr in f:
-        print(simplify(expr))
     s.add(parse_smt2_string(formula))
     
     result = s.check()

@@ -15,10 +15,4 @@ def parse_file(file_path):
         warn(f'Unknown file extension: {file_path}')
         return None
 
-    ground_sat = SAT(formula, 5)
-    if ground_sat is False:
-        return formula.negate()
-    elif ground_sat is True:
-        return formula
-    else:
-        return None
+    return formula

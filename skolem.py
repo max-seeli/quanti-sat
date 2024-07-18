@@ -7,8 +7,7 @@ import sympy as sp
 
 from expression import get_polynomial_expression
 from quantifier import Exists, ForAll, Quantifier
-from util import to_smt
-
+from util import to_smt, set_timeout
 
 class Result(Enum):
     CORRECT = 1
@@ -16,6 +15,8 @@ class Result(Enum):
     CONVERSION_TIMEOUT = 3
     SOLVER_TIMEOUT = 4
     PARSING_ERROR = 5
+    BUG = 6
+    BUG2 = 7
 
 def skolemize(quantified_formula: Quantifier, use_template: bool, degree: int, output: str = None) -> str:
     """
@@ -163,47 +164,75 @@ if __name__ == "__main__":
     else:
         print("Quantified formula:")
         print(quantified_formula)
-        conversion_start = time.time()
-        smt2 = skolemize(quantified_formula, args.use_template, degree=args.degree, output=args.output)
-        conversion_time = time.time() - conversion_start
-
-        print("Converted formula:")
-        print(smt2)
-
-        solving_start = time.time()
-        result = SAT2(smt2, timeout=args.timeout)
         
+        qf = quantified_formula
+        nqf = quantified_formula.negate()
 
-        if result is None:
-            
-            result = Result.SOLVER_TIMEOUT
+        try:
+            qf_conversion_start = time.time()
+            qf_smt2 = set_timeout(skolemize, args.timeout, qf, args.use_template, degree=args.degree, output=args.output)
+            qfconversion_time = time.time() - qf_conversion_start
+
+            nqf_conversion_start = time.time()
+            nqf_smt2 = set_timeout(skolemize, args.timeout, nqf, args.use_template, degree=args.degree, output=args.output)
+            nqf_conversion_time = time.time() - nqf_conversion_start
+
+            conversion_time = (qfconversion_time + nqf_conversion_time) / 2
+        except TimeoutError:
+            result = Result.CONVERSION_TIMEOUT
         else:
-            solving_time = time.time() - solving_start
-            is_sat, model = result
-            if is_sat:
-                result = Result.CORRECT
-            elif not is_sat:
-                result = Result.INCORRECT
+                      
+            print("Converted formula:")
+            print(qf_smt2)
+
+            qf_solving_start = time.time()
+            qf_result = SAT2(qf_smt2, timeout=args.timeout)
+            qf_solving_time = time.time() - qf_solving_start
+
+            nqf_solving_start = time.time()
+            nqf_result = SAT2(nqf_smt2, timeout=args.timeout)
+            nqf_solving_time = time.time() - nqf_solving_start
+
+            solving_time = (qf_solving_time + nqf_solving_time) / 2
+
+            if qf_result is None or nqf_result is None:
+                result = Result.SOLVER_TIMEOUT
+            else:
+                qf_is_sat, qf_model = qf_result
+                nqf_is_sat, nqf_model = nqf_result
+
+                if qf_is_sat and nqf_is_sat:
+                    result = Result.BUG
+                elif (qf_is_sat and not nqf_is_sat) or (not qf_is_sat and nqf_is_sat):
+                    result = Result.CORRECT
+                elif not qf_is_sat and not nqf_is_sat:
+                    result = Result.INCORRECT
+                else:
+                    result = Result.BUG2
             
-            print('Model:')
-            for var, value in model.items():
-                print(f"{var}: {value}")
+                print('Model:')
+                for var, value in qf_model.items():
+                    print(f"{var}: {value}")
 
 
-        print("Result:")
-        match result:
-            case Result.CORRECT:
-                print('The formula was solved CORRECTLY.')
-            case Result.INCORRECT:
-                print('The formula was solved INCORRECTLY.')
-            case Result.CONVERSION_TIMEOUT:
-                print('The formula could not be converted due to timeout.')
-            case Result.SOLVER_TIMEOUT:
-                print('The formula could not be solved due to timeout.')
-            case Result.PARSING_ERROR:
-                print('The formula could not be parsed.')
-            case _:
-                raise ValueError('The experiment needs to be run before getting the result message.')
+    print("Result:")
+    match result:
+        case Result.CORRECT:
+            print('The formula was solved CORRECTLY.')
+        case Result.INCORRECT:
+            print('The formula was solved INCORRECTLY.')
+        case Result.CONVERSION_TIMEOUT:
+            print('The formula could not be converted due to timeout.')
+        case Result.SOLVER_TIMEOUT:
+            print('The formula could not be solved due to timeout.')
+        case Result.PARSING_ERROR:
+            print('The formula could not be parsed.')
+        case Result.BUG:
+            print('There is a BUG.')
+        case Result.BUG2:
+            print('There is a BUG2.')
+        case _:
+            raise ValueError('The experiment needs to be run before getting the result message.')
 
     print("CSV:")
     print(f"{os.path.basename(file)},{result.name},{conversion_time},{solving_time}")
