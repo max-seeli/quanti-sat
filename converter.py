@@ -12,7 +12,7 @@ from quantifier import Exists, ForAll, Quantifier
 from util import to_smt
 
 
-def convert(quantified_formula: Quantifier, degree: int, variant: GenerationVariant, output: str = None) -> str:
+def convert(quantified_formula: Quantifier, degree: int, variant: GenerationVariant) -> str:
     """
     Convert a quantified formula to an SMT2 formula.
 
@@ -24,8 +24,6 @@ def convert(quantified_formula: Quantifier, degree: int, variant: GenerationVari
         The degree of the polynomial templates.
     variant : GenerationVariant, optional
         The generation variant of the SMT2 formula, by default GenerationVariant.FORALL_ONLY.
-    output : str, optional
-        The file to save the SMT2 formula, by default None.
 
     Returns
     -------
@@ -33,7 +31,7 @@ def convert(quantified_formula: Quantifier, degree: int, variant: GenerationVari
         The SMT2 formula.
     """
     converter = Converter(degree, variant)
-    return converter.convert(quantified_formula, output)
+    return converter.convert(quantified_formula)
 
 class GenerationVariant(Enum):
     """
@@ -62,10 +60,9 @@ class Converter:
         variant : GenerationVariant, optional
             The generation variant of the SMT2 formula, by default GenerationVariant.FORALL_ONLY.
         """
-        self.degree = degree
-        self.variant = variant
+        self.extractor = Extractor.get_extractor(degree, variant)
 
-    def convert(self, quantified_formula: Quantifier, output: str = None) -> str:
+    def convert(self, quantified_formula: Quantifier) -> str:
         """
         Convert a quantified formula to an SMT2 formula.
 
@@ -73,16 +70,13 @@ class Converter:
         ----------
         quantified_formula : Quantifier
             The quantified formula to be converted.
-        output : str, optional
-            The file to save the SMT2 formula, by default None.
 
         Returns
         -------
         str
             The SMT2 formula.
         """
-        extractor = Extractor.get_extractor(self.degree, self.variant)
-        forall_quant_vars, template_subs, ground_formula, assertion = extractor.extract(quantified_formula)
+        forall_quant_vars, template_subs, ground_formula, assertion = self.extractor.extract(quantified_formula)
 
         ground_formula = ground_formula.subs(template_subs)
 
@@ -91,9 +85,6 @@ class Converter:
 
         smt2 = self.generate_smt2(list(free_vars), forall_quant_vars, assertion, ground_formula)
 
-        if output is not None:
-            with open(output, 'w') as f:
-                f.write(smt2)
         return smt2
     
     def generate_smt2(self, free_vars: List[sp.Symbol], forall_quant_vars: List[sp.Symbol], assertion: sp.Basic, ground_formula: sp.Basic) -> str:
@@ -105,23 +96,7 @@ class Converter:
         forall_vars = [f'({var.name} Real)' for var in forall_quant_vars]
         forall_vars = f"({' '.join(forall_vars)})"
 
-
-
-        #premise = to_smt(assertion)
-        # Check if ground_formula is CNF
-        #ground_formula = sp.to_cnf(ground_formula)
-        
-        #if isinstance(ground_formula, sp.And):
-        if False:
-            for clause in ground_formula.args:
-                if isinstance(clause, sp.Or):
-                    lhs = sp.And(*[sp.Not(arg) for arg in clause.args[:-1]])
-                    rhs = clause.args[-1]
-                    smt_lines.append(f'(assert (forall {forall_vars} (=> {to_smt(lhs)} {to_smt(rhs)})))')
-                else:
-                    smt_lines.append(f'(assert (forall {forall_vars} (=> (>= 1 0) {to_smt(clause)})))')
-        else:
-            smt_lines.append(f'(assert (forall {forall_vars} (=> (>= 1 0) {to_smt(ground_formula)})))')
+        smt_lines.append(f'(assert (forall {forall_vars} (=> {to_smt(assertion)} {to_smt(ground_formula)})))')
 
         smt_lines.append('(check-sat)')
         smt_lines.append('(get-model)')
@@ -166,7 +141,6 @@ class Extractor(ABC):
             case GenerationVariant.FORALL_EXISTS:
                 return ForallExistsExtractor(degree)
             case GenerationVariant.ASSERTIONS:
-                raise ValueError("Currently not working")
                 return AssertionsExtractor(degree)
             case _:
                 raise ValueError(f'Unsupported generation variant: {variant}')
@@ -354,16 +328,15 @@ class ForallExistsExtractor(Extractor):
                 all_vars.extend(quantified_formula.variables)
                 sub_dict = {var: self.get_polynomial_expression(f'a_{counter}_{i}', all_vars) for i, var in enumerate(quantified_formula.variables)}
 
-            for prev_var, prev_expr in template_subs.items():
-                for var, expr in sub_dict.items():
-                    sub_dict[var] = expr.subs(prev_var, prev_expr)
-
-            template_subs.update(sub_dict)
+                for prev_var, prev_expr in template_subs.items():
+                    for var, expr in sub_dict.items():
+                        sub_dict[var] = expr.subs(prev_var, prev_expr)
+                template_subs.update(sub_dict)
+            
             counter += 1
             quantified_formula = quantified_formula.formula
-        ground_formula = quantified_formula
 
-        return forall_quant_vars, template_subs, ground_formula, sp.true
+        return forall_quant_vars, template_subs, quantified_formula, sp.true
    
 
 
@@ -414,10 +387,9 @@ class AssertionsExtractor(Extractor):
                 template_subs.update(sub_dict)
                 counter += 1
             quantified_formula = quantified_formula.formula
-        ground_formula = quantified_formula
 
         assertions = []
         for var, expr in template_subs.items():
             assertions.append(sp.Eq(var, expr))
         assertion = sp.And(*assertions)
-        return forall_quant_vars, {}, ground_formula, assertion
+        return forall_quant_vars, {}, quantified_formula, assertion

@@ -12,6 +12,14 @@ class Quantifier(ABC):
     def subs(self, *args, **kwargs):
         pass
 
+    @abstractmethod
+    def count_quantified_vars(self):
+        pass
+
+    @abstractmethod
+    def count_quantifier_depth(self):
+        pass
+
     @property
     @abstractmethod
     def free_symbols(self):
@@ -34,6 +42,21 @@ class ForAll(Quantifier):
 
     def subs(self, *args, **kwargs):
         return ForAll(self.variables, self.formula.subs(*args, **kwargs))
+    
+    def count_quantified_vars(self):
+        if isinstance(self.formula, Quantifier):
+            num_forall_vars, num_exists_vars = self.formula.count_quantified_vars()
+            return len(self.variables) + num_forall_vars, num_exists_vars
+        else:
+            return len(self.variables), 0
+        
+    def count_quantifier_depth(self):
+        if isinstance(self.formula, Exists):
+            return 1 + self.formula.count_quantifier_depth()
+        elif isinstance(self.formula, ForAll):
+            return self.formula.count_quantifier_depth()
+        else:
+            return 1
     
     @property
     def free_symbols(self):
@@ -62,6 +85,21 @@ class Exists(Quantifier):
 
     def subs(self, *args, **kwargs):
         return Exists(self.variables, self.formula.subs(*args, **kwargs))
+    
+    def count_quantified_vars(self):
+        if isinstance(self.formula, Quantifier):
+            num_forall_vars, num_exists_vars = self.formula.count_quantified_vars()
+            return num_forall_vars, len(self.variables) + num_exists_vars
+        else:
+            return 0, len(self.variables)
+        
+    def count_quantifier_depth(self):
+        if isinstance(self.formula, ForAll):
+            return 1 + self.formula.count_quantifier_depth()
+        elif isinstance(self.formula, Exists):
+            return self.formula.count_quantifier_depth()
+        else:
+            return 1
     
     @property
     def free_symbols(self):

@@ -98,6 +98,12 @@ def to_smt(constraint: sp.Basic) -> str:
         else:
             warn(f'Unsupported function: {f}')
             return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
+    elif constraint.is_Function:
+        # Non-boolean functions (e.g. skolem functions)
+        if len(constraint.args) == 0:
+            return str(constraint.func).lower()
+        else:
+            return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
     elif isinstance(constraint, sp.UnevaluatedExpr):
         return to_smt(constraint.args[0])
     elif constraint.is_Symbol:
