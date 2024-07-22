@@ -33,7 +33,7 @@ class QuantiSAT(Solver):
         self.smt2 = None
 
     def convert(self):
-        self.smt2 = convert(self.quantified_formula, degree=self.degree, variant=GenerationVariant.FORALL_EXISTS)
+        self.smt2 = convert(self.quantified_formula, degree=self.degree, variant=GenerationVariant.FORALL_ONLY)
 
         if self.output is not None:
             with open(self.output, 'w') as f:

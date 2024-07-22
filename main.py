@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from util import set_timeout
 from solver import QuantiSAT, Skolem
+from PolyHorn.src.PositiveModel import Result as PolyHornResult
 
 
 class Result(Enum):
@@ -181,24 +182,38 @@ class Experiment:
 
                 self.current_solving_time = (qf_time + nqf_time) / 2
 
-                if is_sat_neg and is_sat:
-                    self.current_result = Result.BUG
-                    return None
-                elif (is_sat_neg and not is_sat) or (not is_sat_neg and is_sat):
-                    self.current_result = Result.CORRECT
-                    return is_sat, model if is_sat else model_neg
-                elif not is_sat_neg and not is_sat:
-                    self.current_result = Result.INCORRECT
-                    return None
+                self.current_result = self.__evaluate_correctness(is_sat, is_sat_neg)
+                if self.current_result == Result.CORRECT:
+                    return True, model if is_sat else model_neg
                 else:
-                    self.current_result = Result.BUG2
-                    return None
-
+                    return False, None
+                
             except TimeoutError:
                 self.current_result = Result.SOLVER_TIMEOUT
                 pass
         return None
     
+
+    def __evaluate_correctness(self, is_sat, is_sat_neg):
+        if isinstance(is_sat, PolyHornResult) and isinstance(is_sat_neg, PolyHornResult):
+            if is_sat_neg == PolyHornResult.SAT and is_sat == PolyHornResult.SAT:
+                return Result.BUG
+            elif (is_sat_neg == PolyHornResult.SAT and is_sat == PolyHornResult.UNSAT) \
+                or (is_sat_neg == PolyHornResult.UNSAT and is_sat == PolyHornResult.SAT):
+                return Result.CORRECT
+            elif is_sat_neg == PolyHornResult.UNSAT and is_sat == PolyHornResult.UNSAT:
+                return Result.INCORRECT
+            else:
+                return Result.BUG2
+        else:
+            if is_sat_neg and is_sat:
+                return Result.BUG
+            elif (is_sat_neg and not is_sat) or (not is_sat_neg and is_sat):
+                return Result.CORRECT
+            elif not is_sat_neg and not is_sat:
+                return Result.INCORRECT
+            else:
+                return Result.BUG2
 
     
     def __get_result_message(self):
