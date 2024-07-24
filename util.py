@@ -1,7 +1,10 @@
 import signal
 from typing import Callable
 from warnings import warn
+
 import sympy as sp
+
+from quantifier import Exists, ForAll
 
 def set_timeout(callable: Callable, timeout: int, *args, **kwargs):
     """
@@ -51,7 +54,11 @@ def to_smt(constraint: sp.Basic) -> str:
     str
         The SMT2 string representing the constraint.
     """
-    if constraint.is_Relational:
+    if isinstance(constraint, Exists):
+        return f'(exists ({" ".join([f"({to_smt(var)} Real)" for var in constraint.variables])}) {to_smt(constraint.formula)})'
+    elif isinstance(constraint, ForAll):
+        return f'(forall ({" ".join([f"({to_smt(var)} Real)" for var in constraint.variables])}) {to_smt(constraint.formula)})'
+    elif constraint.is_Relational:
         assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
         arg_pair = f'{to_smt(constraint.lhs)} {to_smt(constraint.rhs)}'
         if constraint.rel_op == '==':
@@ -101,7 +108,7 @@ def to_smt(constraint: sp.Basic) -> str:
     elif constraint.is_Function:
         # Non-boolean functions (e.g. skolem functions)
         if len(constraint.args) == 0:
-            return str(constraint.func).lower()
+            return str(constraint.func)
         else:
             return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
     elif isinstance(constraint, sp.UnevaluatedExpr):
@@ -116,3 +123,22 @@ def to_smt(constraint: sp.Basic) -> str:
         return '(<= 1 0)'
     else:
         raise ValueError(f'Unsupported constraint type: {type(constraint)}\n\tFor constraint: {constraint}')
+
+def split(a, n):
+    """
+    Split a list into n parts.
+
+    Parameters
+    ----------
+    a : List
+        The list to be split.
+    n : int
+        The number of parts to split the list.
+
+    Returns
+    -------
+    List[List]
+        The list of parts.
+    """
+    k, m = divmod(len(a), n)
+    return [a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]

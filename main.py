@@ -116,7 +116,7 @@ class Experiment:
         if result is not None:
             is_sat, model = result
             
-            if self.verbose.value >= Verbosity.RESULT_FORMULA_MODEL.value:
+            if self.verbose.value >= Verbosity.RESULT_FORMULA_MODEL.value and is_sat:
                 print('Model:')
                 for var, value in model.items():
                     print(f"{var}: {value}")
@@ -163,6 +163,8 @@ class Experiment:
         if self.verbose.value >= Verbosity.RESULT_FORMULA.value:
             print('Converted formula:')
             print(qf_conv)
+            print('Negated converted formula:')
+            print(nqf_conv)
 
         if not self.convert_only:
             try:
@@ -204,6 +206,7 @@ class Experiment:
             elif is_sat_neg == PolyHornResult.UNSAT and is_sat == PolyHornResult.UNSAT:
                 return Result.INCORRECT
             else:
+                print(is_sat, is_sat_neg)
                 return Result.BUG2
         else:
             if is_sat_neg and is_sat:

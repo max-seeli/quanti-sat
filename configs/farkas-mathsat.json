@@ -5,7 +5,6 @@
     "degree_of_strict_unsat": 2,
     "max_d_of_strict": 1,
     "solver_name": "mathsat",
-    "output_path": "results.txt",
     "unsat_core_heuristic": false,
     "SAT_heuristic": true,
     "integer_arithmetic": false

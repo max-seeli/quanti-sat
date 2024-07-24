@@ -53,7 +53,6 @@ def SAT2(formula: str, timeout: int) -> Tuple[bool, Dict[str, float]]:
     s = Solver()
     s.set("timeout", timeout * 1000)
     
-    # Provide a model for all variables (even those that could be logically reduced)
 
 
     f = parse_smt2_string(formula)

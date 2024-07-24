@@ -146,7 +146,10 @@ class Skolem(Solver):
 
         forall_format = ' '.join([f'({var.name} Real)' for var in forall_vars])
 
-        smt_lines.append(f'(assert (forall ({forall_format}) (=> (>= 1 0) {to_smt(formula)})))')
+        if len(forall_vars) == 0:
+            smt_lines.append(f'(assert (=> (>= 1 0) {to_smt(formula)}))')
+        else:
+            smt_lines.append(f'(assert (forall ({forall_format}) (=> (>= 1 0) {to_smt(formula)})))')
         smt_lines.append('(check-sat)')
         smt_lines.append('(get-model)')
 
