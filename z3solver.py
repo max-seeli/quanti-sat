@@ -53,8 +53,6 @@ def SAT2(formula: str, timeout: int) -> Tuple[bool, Dict[str, float]]:
     s = Solver()
     s.set("timeout", timeout * 1000)
     
-
-
     f = parse_smt2_string(formula)
     s.add(parse_smt2_string(formula))
     
@@ -65,7 +63,7 @@ def SAT2(formula: str, timeout: int) -> Tuple[bool, Dict[str, float]]:
     elif result == unsat:
         return False, {}
     else:
-        return None
+        return None, {}
 
 
 def to_z3(expr: sp.Basic) -> z3.ExprRef:

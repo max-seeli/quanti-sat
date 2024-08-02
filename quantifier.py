@@ -13,6 +13,10 @@ class Quantifier(ABC):
         pass
 
     @abstractmethod
+    def copy(self):
+        pass
+
+    @abstractmethod
     def count_quantified_vars(self):
         pass
 
@@ -23,6 +27,10 @@ class Quantifier(ABC):
     @property
     @abstractmethod
     def free_symbols(self):
+        pass
+
+    @abstractmethod
+    def set_ground_formula(self, value):
         pass
 
 class ForAll(Quantifier):
@@ -43,6 +51,13 @@ class ForAll(Quantifier):
     def subs(self, *args, **kwargs):
         return ForAll(self.variables, self.formula.subs(*args, **kwargs))
     
+    def copy(self):
+        
+        try:
+            return ForAll(self.variables, self.formula.copy())
+        except AttributeError:
+            return ForAll(self.variables, self.formula)
+
     def count_quantified_vars(self):
         if isinstance(self.formula, Quantifier):
             num_forall_vars, num_exists_vars = self.formula.count_quantified_vars()
@@ -66,6 +81,12 @@ class ForAll(Quantifier):
                 result.append(s)
 
         return result
+    
+    def set_ground_formula(self, value):
+        if isinstance(self.formula, Quantifier):
+            self.formula.set_ground_formula(value)
+        else:
+            self.formula = value
 
     
 class Exists(Quantifier):
@@ -85,6 +106,12 @@ class Exists(Quantifier):
 
     def subs(self, *args, **kwargs):
         return Exists(self.variables, self.formula.subs(*args, **kwargs))
+    
+    def copy(self):
+        try:
+            return Exists(self.variables, self.formula.copy())
+        except AttributeError:
+            return Exists(self.variables, self.formula)
     
     def count_quantified_vars(self):
         if isinstance(self.formula, Quantifier):
@@ -109,3 +136,9 @@ class Exists(Quantifier):
                 result.append(s)
 
         return result
+    
+    def set_ground_formula(self, value):
+        if isinstance(self.formula, Quantifier):
+            self.formula.set_ground_formula(value)
+        else:
+            self.formula = value

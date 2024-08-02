@@ -7,19 +7,8 @@ import time
 
 from tqdm import tqdm
 
-from util import set_timeout
-from solver import QuantiSAT, Skolem
-from PolyHorn.src.PositiveModel import Result as PolyHornResult
-
-
-class Result(Enum):
-    CORRECT = 1
-    INCORRECT = 2
-    CONVERSION_TIMEOUT = 3
-    SOLVER_TIMEOUT = 4
-    PARSING_ERROR = 5
-    BUG = 6
-    BUG2 = 7
+from util import Result
+from solver import QuantiSAT, MultiQuantiSAT, Skolem
 
 class Verbosity(Enum):
     RESULT_ONLY = 1
@@ -31,6 +20,7 @@ class Verbosity(Enum):
     
 class SolverType(Enum):
     QUANTISAT = QuantiSAT
+    MULTIQUANTISAT = MultiQuantiSAT
     SKOLEM = Skolem
 
     def __str__(self):
@@ -58,6 +48,8 @@ class Experiment:
             self.__run_file()
 
     def __run_folder(self):
+        self.args.output = None
+
         total, terminated, success, sat, unsat = 0, 0, 0, 0, 0
         dnf = []
         successful = []
@@ -73,6 +65,8 @@ class Experiment:
             for file_name in file_names:
                 if file_name.endswith('.m') or file_name.endswith('.smt2'):
                     files.append(os.path.join(root, file_name))
+
+        #files = [os.path.join(root, file) for file in ['ex15_formula_197.m', 'ex08_formula_114.m', 'ex15_formula_084.m', 'ex06_formula_096.m', 'ex06_formula_039.m', 'ex17_formula_012.m', 'ex17_formula_101.m', 'ex15_formula_255.m', 'ex07_formula_278.m', 'ex12_formula_018.m', 'ex15_formula_073.m', 'ex15_formula_138.m', 'ex10_formula_132.m', 'ex16_formula_166.m', 'ex15_formula_160.m', 'ex12_formula_096.m', 'ex09_formula_041.m', 'ex08_formula_200.m', 'ex15_formula_283.m', 'ex12_formula_185.m', 'ex16_formula_272.m', 'ex12_formula_039.m', 'ex15_formula_274.m', 'ex13_formula_278.m', 'ex11_formula_067.m', 'ex06_formula_153.m', 'ex07_formula_027.m', 'ex11_formula_241.m', 'ex15_formula_141.m', 'ex16_formula_054.m', 'ex15_formula_052.m', 'ex15_formula_119.m', 'ex11_formula_219.m', 'ex13_formula_006.m', 'ex10_formula_094.m', 'ex13_formula_092.m', 'ex08_formula_156.m', 'ex13_formula_176.m', 'ex15_formula_122.m', 'ex15_formula_069.m', 'ex15_formula_031.m', 'ex15_formula_217.m']]
 
         for file in (pbar := tqdm(files)):
             pbar.set_description(f'Processing {file}, Total: {success}/{total}')
@@ -107,7 +101,10 @@ class Experiment:
         if self.verbose.value >= Verbosity.RESULT_FORMULA_MODEL.value:
             print('Models:')
             for file, model in models.items():
-                print(f'{file}: {model}')
+                if isinstance(model, dict):
+                    print(f'{file}:')
+                    for var, value in model.items():
+                        print(f"{var}: {value}")
 
     def __run_file(self):
         result = self.__main(self.file)
@@ -122,102 +119,63 @@ class Experiment:
                     print(f"{var}: {value}")
         
         print('CSV:')
-        print(f'{os.path.basename(self.file)},{self.current_result.name},{self.current_conversion_time},{self.current_solving_time},{self.num_forall_vars},{self.num_exists_vars},{self.num_switches}')
+        if self.other_metrics is not None:
+            print(f'{os.path.basename(self.file)},{self.current_result.name},{self.current_conversion_time},{self.current_solving_time},{self.num_forall_vars},{self.num_exists_vars},{self.num_switches},{",".join(str(metric) for metric in self.other_metrics)}')
+        else:
+            print(f'{os.path.basename(self.file)},{self.current_result.name},{self.current_conversion_time},{self.current_solving_time},{self.num_forall_vars},{self.num_exists_vars},{self.num_switches}')
 
     def __main(self, file: str):
         self.current_result = None
         self.current_conversion_time = None
         self.current_solving_time = None
         self.num_forall_vars, self.num_exists_vars, self.num_switches = None, None, None
+        self.other_metrics = None
 
-        quantified_formula = parse_file(file)
-        if quantified_formula is None:
+        constraint_system = parse_file(file)
+        if constraint_system is None:
             self.current_result = Result.PARSING_ERROR
             warn("Parsing error")
             return None
         
-        self.num_forall_vars, self.num_exists_vars = quantified_formula.count_quantified_vars()
-        self.num_switches = quantified_formula.count_quantifier_depth()
+        per_formula_quantifier_counts = [quantified_formula.count_quantified_vars() for quantified_formula in constraint_system]
+        per_formula_switches = [quantified_formula.count_quantifier_depth() for quantified_formula in constraint_system]
 
-        if self.verbose.value >= Verbosity.RESULT_FORMULA.value:
-            print('Quantified formula:')
-            print(quantified_formula)
+        self.num_forall_vars = max([num_forall_vars for num_forall_vars, _ in per_formula_quantifier_counts])
+        self.num_exists_vars = max([num_exists_vars for _, num_exists_vars in per_formula_quantifier_counts])
+        self.num_switches = max(per_formula_switches)
 
-        qf = self.solver_type(quantified_formula, self.args)
-        nqf = self.solver_type(quantified_formula.negate(), self.args)
-
+        args_dict = vars(self.args)
+        solver = self.solver_type(constraint_system, args_dict)
+        
         try:
-            qf_time = time.time()
-            qf_conv = set_timeout(qf.convert, self.timeout)
-            qf_time = time.time() - qf_time
+            conversion_time = time.time()
+            solver.convert()
+            self.current_conversion_time = time.time() - conversion_time
 
-            nqf_time = time.time()
-            nqf_conv = set_timeout(nqf.convert, self.timeout)
-            nqf_time = time.time() - nqf_time
-
-            self.current_conversion_time = (qf_time + nqf_time) / 2
         except TimeoutError:
             self.current_result = Result.CONVERSION_TIMEOUT
             return None
         
         if self.verbose.value >= Verbosity.RESULT_FORMULA.value:
-            print('Converted formula:')
-            print(qf_conv)
-            print('Negated converted formula:')
-            print(nqf_conv)
+            solver.print()
 
         if not self.convert_only:
             try:
-                qf_time = time.time()
-                qf_result = set_timeout(qf.solve, self.timeout)
-                if qf_result is None:
-                    raise TimeoutError()
-                is_sat, model = qf_result
-                qf_time = time.time() - qf_time
-
-                nqf_time = time.time()
-                nqf_result = set_timeout(nqf.solve, self.timeout)
-                if nqf_result is None:
-                    raise TimeoutError()
-                is_sat_neg, model_neg = nqf_result
-                nqf_time = time.time() - nqf_time
-
-                self.current_solving_time = (qf_time + nqf_time) / 2
-
-                self.current_result = self.__evaluate_correctness(is_sat, is_sat_neg)
+                solver_time = time.time()
+                self.current_result, model, other_metrics = solver.solve()
+                self.current_solving_time = time.time() - solver_time
+                self.other_metrics = other_metrics
                 if self.current_result == Result.CORRECT:
-                    return True, model if is_sat else model_neg
-                else:
+                    return True, model
+                elif self.current_result == Result.INCORRECT:
                     return False, None
+                elif self.current_result == Result.SOLVER_TIMEOUT:
+                    return None
                 
             except TimeoutError:
                 self.current_result = Result.SOLVER_TIMEOUT
                 pass
         return None
-    
-
-    def __evaluate_correctness(self, is_sat, is_sat_neg):
-        if isinstance(is_sat, PolyHornResult) and isinstance(is_sat_neg, PolyHornResult):
-            if is_sat_neg == PolyHornResult.SAT and is_sat == PolyHornResult.SAT:
-                return Result.BUG
-            elif (is_sat_neg == PolyHornResult.SAT and is_sat == PolyHornResult.UNSAT) \
-                or (is_sat_neg == PolyHornResult.UNSAT and is_sat == PolyHornResult.SAT):
-                return Result.CORRECT
-            elif is_sat_neg == PolyHornResult.UNSAT and is_sat == PolyHornResult.UNSAT:
-                return Result.INCORRECT
-            else:
-                print(is_sat, is_sat_neg)
-                return Result.BUG2
-        else:
-            if is_sat_neg and is_sat:
-                return Result.BUG
-            elif (is_sat_neg and not is_sat) or (not is_sat_neg and is_sat):
-                return Result.CORRECT
-            elif not is_sat_neg and not is_sat:
-                return Result.INCORRECT
-            else:
-                return Result.BUG2
-
     
     def __get_result_message(self):
         match self.current_result:

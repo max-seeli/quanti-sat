@@ -21,15 +21,18 @@ def parse_file(file_path):
         script = parser.get_script(stream)
 
     f = script.get_last_formula()
-    converted_f: Quantifier = from_pysmt(f)
 
-    free_symbols = converted_f.free_symbols
-    if len(free_symbols) > 0:
-        converted_f = Exists(list(free_symbols), converted_f)
+    if f.is_and():
+        converted_system = [from_pysmt(sub_f) for sub_f in f.args()]
+    else:
+        converted_system = [from_pysmt(f)]
 
-    return converted_f
+    for i, formula in enumerate(converted_system):
+        free_symbols = formula.free_symbols
+        if len(free_symbols) > 0:
+            converted_system[i] = Exists(list(free_symbols), formula)
 
-
+    return converted_system
 
 def from_pysmt(expr) -> Quantifier:
     """
@@ -67,8 +70,8 @@ def from_pysmt(expr) -> Quantifier:
         assert len(expr.args()) >= 2, f'Expected more or equal to 2 arguments, got {len(expr.args())}'
         return sp.And(*[from_pysmt(arg) for arg in expr.args()], evaluate=False)
     elif expr.is_or():
-        assert len(expr.args()) == 2, f'Expected 2 arguments, got {len(expr.args())}'
-        return sp.Or(from_pysmt(expr.arg(0)), from_pysmt(expr.arg(1)), evaluate=False)
+        assert len(expr.args()) >= 2, f'Expected more or equal to 2 arguments, got {len(expr.args())}'
+        return sp.Or(*[from_pysmt(arg) for arg in expr.args()], evaluate=False)
     elif expr.is_not():
         assert len(expr.args()) == 1, f'Expected 1 argument, got {len(expr.args())}'
 
@@ -89,7 +92,6 @@ def from_pysmt(expr) -> Quantifier:
     elif expr.is_constant():
         assert len(expr.args()) == 0, f'Expected 0 arguments, got {len(expr.args())}'
         assert expr.constant_value() is not None, f'Expected a constant value, got None'
-        print(expr.constant_value())
         # Check if the constant is an integer
         if re.match(r'^-?\d+$', str(expr.constant_value())):
             return sp.Number(int(expr.constant_value()))

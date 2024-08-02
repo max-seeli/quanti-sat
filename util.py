@@ -1,10 +1,21 @@
 import signal
+from enum import Enum
 from typing import Callable
 from warnings import warn
 
 import sympy as sp
 
 from quantifier import Exists, ForAll
+
+
+class Result(Enum):
+    CORRECT = 1
+    INCORRECT = 2
+    CONVERSION_TIMEOUT = 3
+    SOLVER_TIMEOUT = 4
+    PARSING_ERROR = 5
+    BUG = 6
+    BUG2 = 7
 
 def set_timeout(callable: Callable, timeout: int, *args, **kwargs):
     """
@@ -32,6 +43,7 @@ def set_timeout(callable: Callable, timeout: int, *args, **kwargs):
         If the operation times out.
     """
     def timeout_handler(signum, frame):
+        print("Hi")
         raise TimeoutError(f'The operation {callable.__name__} timed out after {timeout} seconds.')
     
     signal.signal(signal.SIGALRM, timeout_handler)
@@ -101,6 +113,7 @@ def to_smt(constraint: sp.Basic) -> str:
                 raise ValueError(f'Unable to reduce negation on: {type(child)}')
         elif f == 'implies':
             assert len(constraint.args) == 2, f'Expected 2 arguments, got {len(constraint.args)}'
+            #return f'(=> {to_smt(constraint.args[0])} {to_smt(constraint.args[1])})'
             return f'(or {to_smt(sp.Not(constraint.args[0]))} {to_smt(constraint.args[1])})'
         else:
             warn(f'Unsupported function: {f}')
@@ -110,17 +123,17 @@ def to_smt(constraint: sp.Basic) -> str:
         if len(constraint.args) == 0:
             return str(constraint.func)
         else:
-            return f'({str(constraint.func).lower()} {" ".join([to_smt(arg) for arg in constraint.args])})'
+            return f'({str(constraint.func)} {" ".join([to_smt(arg) for arg in constraint.args])})'
     elif isinstance(constraint, sp.UnevaluatedExpr):
         return to_smt(constraint.args[0])
     elif constraint.is_Symbol:
         return str(constraint)
     elif constraint.is_Number:
-        return str(constraint)
+        return str(float(constraint))
     elif constraint == sp.true:
-        return '(<= 0 1)'
+        return '(<= 0.0 1.0)'
     elif constraint == sp.false:
-        return '(<= 1 0)'
+        return '(<= 1.0 0.0)'
     else:
         raise ValueError(f'Unsupported constraint type: {type(constraint)}\n\tFor constraint: {constraint}')
 

@@ -3,6 +3,23 @@ from itertools import product
 from typing import List
 import sympy as sp
 
+def get_function_expression(name: str, parameters: List[sp.Symbol]) -> sp.Expr:
+    """
+    Get a function expression given the name and the parameters.
+    
+    Parameters
+    ----------
+    name : str
+        The name of the function.
+    parameters : List[sp.Symbol]
+        The parameters of the function.
+    
+    Returns
+    -------
+    sp.Expr
+        The function expression.
+    """
+    return sp.Function(name)(*parameters)
 
 def get_polynomial_expression(coeffs_name: str, variables: List[sp.Symbol], degree: int) -> sp.Expr:
     """

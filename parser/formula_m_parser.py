@@ -150,4 +150,4 @@ def parse_file(file_path):
     with open(file_path, 'r') as f:
         data = f.read()
     parser = yacc.yacc()
-    return parser.parse(data)
+    return [parser.parse(data)]
