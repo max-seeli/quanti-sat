@@ -1,6 +1,7 @@
 import os
 from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple
+from enum import Enum
 
 import sympy as sp
 
@@ -13,10 +14,11 @@ from util import to_smt, set_timeout, Result
 from z3solver import SAT2
 from cvc5solver import CVC5
 
+class SolverBackend(Enum):
+    Z3 = 1
+    CVC5 = 2
 
 class Solver(ABC):
-
-    
 
     def __init__(self, constraint_system: List[Quantifier], args: dict):
         self.constraint_system = constraint_system
@@ -62,20 +64,6 @@ class Solver(ABC):
                 print("1")
                 return Result.SOLVER_TIMEOUT, {}, []
             elif sat == self.SAT:
-                for neg in self.smt2_negs:
-                    result_neg = self._solve(neg)
-                    if result_neg is not None:
-                        sat_neg, model_neg = result_neg
-                        if sat_neg == self.UNKNOWN:
-                            print("2")
-                            return Result.CORRECT, {}, []
-                        elif sat_neg == self.SAT:
-                            return Result.BUG, {}, []
-                        elif sat_neg == self.UNSAT:
-                            continue
-                    else:
-                        print("3")
-                        return Result.SOLVER_TIMEOUT, {}, []
                 return Result.CORRECT, model, []
             elif sat == self.UNSAT:
                 any_timeout = False
@@ -126,13 +114,29 @@ class MultiQuantiSAT(Solver):
         self.solvers = [QuantiSAT(constraint_system, {**args, **config}) for config in config_args]
 
     def convert(self):
+        successful = []
         for solver in self.solvers:
-            solver.convert()
+            try:
+                solver.convert()
+                successful.append(solver)
+            except TimeoutError:
+                continue
+        
+        if len(successful) == 0:
+            raise TimeoutError('All conversion attempts timed out.')
+        for solver in successful:
+            print("Converted with", solver.polyhorn_config, solver.degree)
+        self.solvers = successful
+
 
     def solve(self):
         results = []
         for solver in self.solvers:
-            result, model, _ = solver.solve()
+            try:
+                result, model, _ = solver.solve()
+            except TimeoutError:
+                results.append(Result.SOLVER_TIMEOUT)
+                continue
             if result == Result.CORRECT:
                 print("Solved with", solver.polyhorn_config, solver.degree)
                 return Result.CORRECT, model, [solver.polyhorn_config, solver.degree]
@@ -181,7 +185,13 @@ class Skolem(Solver):
         if not self.use_template:
             self.degree = None
         self.timeout = args['timeout']
+        self.backend = args['backend']
 
     def _solve(self, smt2: str) -> Tuple[Result, Dict]:
-        return SAT2(smt2, self.timeout)
+        if self.backend == SolverBackend.Z3:
+            return SAT2(smt2, self.timeout)
+        elif self.backend == SolverBackend.CVC5:
+            return CVC5(smt2, self.timeout)
+        else:
+            raise ValueError('Invalid backend.')
 

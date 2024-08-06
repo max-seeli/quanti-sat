@@ -43,7 +43,6 @@ def set_timeout(callable: Callable, timeout: int, *args, **kwargs):
         If the operation times out.
     """
     def timeout_handler(signum, frame):
-        print("Hi")
         raise TimeoutError(f'The operation {callable.__name__} timed out after {timeout} seconds.')
     
     signal.signal(signal.SIGALRM, timeout_handler)

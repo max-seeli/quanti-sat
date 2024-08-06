@@ -8,7 +8,7 @@ import time
 from tqdm import tqdm
 
 from util import Result
-from solver import QuantiSAT, MultiQuantiSAT, Skolem
+from solver import QuantiSAT, MultiQuantiSAT, Skolem, SolverBackend
 
 class Verbosity(Enum):
     RESULT_ONLY = 1
@@ -154,6 +154,7 @@ class Experiment:
 
         except TimeoutError:
             self.current_result = Result.CONVERSION_TIMEOUT
+            self.current_conversion_time = None
             return None
         
         if self.verbose.value >= Verbosity.RESULT_FORMULA.value:
@@ -170,10 +171,12 @@ class Experiment:
                 elif self.current_result == Result.INCORRECT:
                     return False, None
                 elif self.current_result == Result.SOLVER_TIMEOUT:
+                    self.current_solving_time = None
                     return None
                 
             except TimeoutError:
                 self.current_result = Result.SOLVER_TIMEOUT
+                self.current_solving_time = None
                 pass
         return None
     
@@ -217,6 +220,8 @@ if __name__ == '__main__':
                         help='The solver to be used.')
     parser.add_argument('--verbose', type=lambda v: Verbosity[v], default=Verbosity.RESULT_ONLY, choices=list(Verbosity),
                         help='The verbosity level of the output.')
+    parser.add_argument('--backend', type=lambda v: SolverBackend[v], default=SolverBackend.Z3, choices=list(SolverBackend),
+                        help='The backend to be used for the Skolem solver.')
     parser.add_argument('--timeout', type=int, default=15,
                         help='The timeout for the SMT solver. Default is 15s.')
     args = parser.parse_args()
